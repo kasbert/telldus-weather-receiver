@@ -19,7 +19,7 @@ As Telldus weather station indoor unit receives a message from the outdoor unit,
  * Oregon-THGR810 or Oregon-PCR800
  * Telldus-FT0385R
 
- Requires
+Requires
  * Arduino Nano
  * 433Mhz Receiver
  * Arduino IDE for compiling and installing "telldus-weather-receiver.ino"
