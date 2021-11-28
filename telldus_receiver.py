@@ -9,7 +9,6 @@ import sys
 import serial
 import time
 import argparse
-from modem import *
 import logging
 
 from datetime import datetime
@@ -42,6 +41,17 @@ def crc8(message, polynomial, init):
                 crc = (crc << 1)
         crc &= 0xff
     return crc
+
+def reflect4(x):
+    x = (x & 0xCC) >> 2 | (x & 0x33) << 2
+    x = (x & 0xAA) >> 1 | (x & 0x55) << 1
+    return x
+
+def reflect_nibbles(message):
+    b = bytearray()
+    for byte in message:
+        b.push(reflect4(byte))
+    return b
 
 TELLDUS_MSGLEN = 37
 SWITCHDOCLABS_MSGLEN = 14
@@ -148,7 +158,7 @@ class WeatherReceiver:
     data['abs_pressure'] = None
     data['wind_ave'] = myAveWindSpeed
     data['wind_gust'] = myGust
-    data['wind_dir'] = int(myWindDirection / 22.5)
+    data['wind_dir'] = int(myWindDirection / 22.5) % 16
     data['rain'] = myCumulativeRain
     data['illuminance'] = myLight
     data['uv'] = myUV
@@ -254,7 +264,7 @@ class WeatherReceiver:
     data['abs_pressure'] = pressure_abs
     data['wind_ave'] = wind_speed_avg
     data['wind_gust'] = wind_speed_avg
-    data['wind_dir'] = int(wind_direction / 22.5)
+    data['wind_dir'] = int(wind_direction / 22.5) % 16
     data['rain'] = rain_total
     data['illuminance'] = None
     data['uv'] = None
@@ -337,10 +347,19 @@ def main():
             context.status.set('data', 'last', data)
 
             # process new data
-            pywws.process.process_data(context)
-            # do tasks
-            tasks.do_tasks()
-            tasks.do_live(data)
+            try:
+                logger.debug('context', context)
+                pywws.process.process_data(context)
+            except Exception as error:
+                logger.exception(error)
+            try:
+                tasks.do_tasks()
+            except Exception as error:
+                logger.exception(error)
+            try:
+                tasks.do_live(data)
+            except Exception as error:
+                logger.exception(error)
 
 if __name__ == "__main__":
     main()

@@ -24,12 +24,15 @@ Requires
  * 433Mhz Receiver
  * Arduino IDE for compiling and installing "telldus-weather-receiver.ino"
  * Python3
-    * sudo pip install pywws
+    sudo apt install python3-pip
+    sudo pip3 install pyserial
+    sudo pip3 install pywws
 
 Create a data dir with weather.ini (see https://pywws.readthedocs.io/en/latest/guides/weather_ini.html)
 
 See also
 - https://github.com/merbanan/rtl_433/ has a good set of decoders, if you own RTL-SDR USB stick
+- https://github.com/robwlakes/ArduinoWeatherOS has a very good description of radio signalling
 - Tellstick
 - https://github.com/pimatic/RFControl
 - https://github.com/roccomuso/iot-433mhz/

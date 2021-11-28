@@ -25,7 +25,9 @@
 */
 
 
+const int txPin = 7;
 const int rxPin = 8;
+const int ledPin = 9;
 
 #define IS_SHORT(x) ((x >= 300) && (x <= 750))
 #define IS_LONG(x) ((x > 750) && (x <= 1150))
@@ -41,7 +43,7 @@ const int rxPin = 8;
 
 void setup() {
   pinMode(rxPin, INPUT);
-  pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(ledPin, OUTPUT);
   Serial.begin(115200);
   Serial.println("Manchester receiver v0.1");
 }
@@ -55,8 +57,8 @@ static void emit_bit(unsigned char *data, unsigned int *outcount, int level) {
   bitindex = 7 - bitindex;
   if (level) {
     data[byteindex] |= 1 << bitindex;
-  } else {
-    data[byteindex] &= ~(1 << bitindex);
+  //} else {
+  //  data[byteindex] &= ~(1 << bitindex);
   }
   (*outcount)++;
 }
@@ -123,51 +125,122 @@ uint8_t crc8(uint8_t const message[], unsigned nBytes, uint8_t polynomial, uint8
   return crc;
 }
 
-void handle_data(uint8_t *data, const unsigned int bitcount)
+static void send_bits(uint8_t data, int bitcount) {
+  for (int j = 0x80; bitcount; bitcount--, j >>= 1) {
+    if (data & j) {
+      digitalWrite(txPin, HIGH);
+      delayMicroseconds(500);
+      digitalWrite(txPin, LOW);
+      delayMicroseconds(450);
+    } else {
+      digitalWrite(txPin, LOW);
+      delayMicroseconds(500);
+      digitalWrite(txPin, HIGH);
+      delayMicroseconds(450);
+    }
+  }
+}
+
+
+static void send_data(uint8_t *data, const unsigned int bitcount) {
+  int i;
+  send_bits(0xff, 8);  // Send sync
+  send_bits(0xff, 8);
+  send_bits(0xff, 8);
+  send_bits(0xff, 8);
+  for (i = 0; i < bitcount / 8; i++) {
+    send_bits(data[i], 8);
+  }
+  send_bits(data[i], bitcount & 7);
+  digitalWrite(txPin, LOW);
+  delayMicroseconds(2000);
+}
+
+
+static inline uint8_t nibble(char b)
+{
+  if (b >= '0' && b <= '9') return (b - '0');
+  if (b >= 'A' && b <= 'F') return ((b - 'A') + 10);
+  if (b >= 'a' && b <= 'f') return ((b - 'a') + 10);
+  return (0);
+}
+
+static void handle_send_data(uint8_t *str, const unsigned int str_length) {
+  uint8_t data[255];
+  int i = 0, j = 0;
+  unsigned bitcount;
+  if (str_length < 8) {
+    return;
+  }
+  bitcount = (nibble(str[i++]) << 12) | (nibble(str[i++]) << 8) | 
+    (nibble(str[i++]) << 4) | (nibble(str[i++]) << 0);
+  if (bitcount / 4 > str_length - 8) {
+    Serial.println("ERROR LENGTH");
+    return;
+  }
+  if (str[i++] != ' ') {
+    Serial.println("ERROR SPACE 1");
+    return;
+  }
+  int bytecount = (bitcount + 7) / 8;
+  for (j = 0; j < bytecount; j++) {
+    data[j] = (nibble(str[i++]) << 4) | (nibble(str[i++]) << 0);
+  }
+  if (str[i++] != ' ') {
+        Serial.println(str[i-1], HEX);
+    Serial.println("ERROR SPACE 2");
+    return;
+  }
+  uint8_t crc = (nibble(str[i++]) << 4) | (nibble(str[i++]) << 0);
+  uint8_t crc2 = crc8(data, bytecount, 0x8C, 0);
+  if (crc != crc2) {
+    Serial.print("ERROR CRC ");
+    Serial.println(crc2, HEX);
+    return;
+  }
+
+  send_data(data, bitcount);
+}
+
+const char hexa[] =
+{
+  '0', '1', '2', '3', '4', '5', '6', '7',
+  '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'
+};
+
+static void handle_data(uint8_t *data, const unsigned int bitcount)
 {
   if (bitcount < 16) {
     // Not interested in short messages
     return;
   }
-  if (bitcount < 0x1000) {
-    Serial.print('0');
-  }
-  if (bitcount < 0x100) {
-    Serial.print('0');
-  }
-  if (bitcount < 0x10) {
-    Serial.print('0');
-  }
-  Serial.print(bitcount, HEX);
+  Serial.print(hexa[(bitcount & 0xF000) >> 12]);
+  Serial.print(hexa[(bitcount & 0x0F00) >> 8]);
+  Serial.print(hexa[(bitcount & 0x00F0) >> 4]);
+  Serial.print(hexa[(bitcount & 0x000F) >> 0]);
   Serial.print(' ');
   int bytecount = (bitcount + 7) / 8;
   for (int i = 0; i < bytecount; i++) {
-    if (data[i] < 0x10) {
-      Serial.print('0');
-    }
-    Serial.print(data[i], HEX);
+    Serial.print(hexa[(data[i] & 0xF0) >> 4]);
+    Serial.print(hexa[(data[i] & 0x0F) >> 0]);
   }
   uint8_t crc = crc8(data, bytecount, 0x8C, 0);
   Serial.print(' ');
-  if (crc < 0x10) {
-    Serial.print('0');
-  }
-  Serial.print(crc, HEX);
+  Serial.print(hexa[(crc & 0xF0) >> 4]);
+  Serial.print(hexa[(crc & 0x0F) >> 0]);
   Serial.println("");
 }
 
 void loop() {
   unsigned int bitcount = 0;
   uint8_t data[MAX_DATA];
+  uint8_t send_data[255];
+  int send_length = 0;
 
   unsigned char state = NOSYNC0;
   unsigned long t = 0;
   unsigned long prev_us = micros();
   int prev_rx = digitalRead(rxPin);
-  if (prev_rx) {
-    // Start with high, skip one ?
-    // state = manchester_decode (500, level, data, &bitcount, state);
-  }
 
   do
   {
@@ -184,7 +257,7 @@ void loop() {
     if (t >= MAX_PULSE) rx = ~rx;
 
     state = manchester_decode (t, rx, data, &bitcount, state);
-    digitalWrite(LED_BUILTIN, state < T1 ? LOW : HIGH);
+    digitalWrite(ledPin, state < T1 ? LOW : HIGH);
 
     if ((bitcount >= sizeof(data) * 8) // Data buffer overflow
       || (state < T1 && bitcount)) {
@@ -192,6 +265,20 @@ void loop() {
       handle_data(data, bitcount);
       bitcount = 0;
     }
+
+    if (!IS_SHORT(t) && !IS_LONG(t)) {
+      while (Serial.available()) {
+        // Handle serial when not receiving
+        int c = Serial.read();
+        send_data[send_length++] = c;
+        if (c == '\r' || c == '\n' || send_length >= sizeof(send_data) - 1) {
+          send_data[send_length] = 0;
+          handle_send_data(send_data, send_length);
+          send_length = 0;
+        }
+      }
+    }
+
   } while (1 /*|| IS_SHORT(t) || IS_LONG(t)*/);
 
 }
